@@ -1,0 +1,43 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Patch gradlew and build
+        run: |
+          python3 - << 'PYEOF'
+import os, stat
+new_gradlew = """#!/usr/bin/env sh
+APP_HOME="$(cd "$(dirname "$0")" && pwd -P)"
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ -n "$JAVA_HOME" ]; then JAVACMD="$JAVA_HOME/bin/java"; else JAVACMD="java"; fi
+exec "$JAVACMD" -Xmx2048m -Xms512m -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+"""
+with open('gradlew', 'w') as f:
+    f.write(new_gradlew)
+os.chmod('gradlew', stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+print("gradlew patched successfully")
+PYEOF
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: brand-quiz-debug
+          path: app/build/outputs/apk/debug/*.apk
