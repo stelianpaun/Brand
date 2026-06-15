@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#FF6B00"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <title>QUIZ</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    input[type=color] { -webkit-appearance: none; cursor: pointer; }
+    input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+    input[type=color]::-webkit-color-swatch { border: none; border-radius: 4px; }
+    ::placeholder { color: rgba(255,255,255,0.45); }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
+const INITIAL_QUESTIONS = [
+  { id: 1, text: "Care este capitala României?", options: ["Cluj-Napoca", "Timișoara", "București", "Iași"], correct: 2 },
+  { id: 2, text: "Câte culori are steagul României?", options: ["2", "3", "4", "5"], correct: 1 },
+  { id: 3, text: "Ce fluviu trece prin București?", options: ["Dunărea", "Siretul", "Dâmbovița", "Oltul"], correct: 2 },
+];
+const INITIAL_PRIZES = [
+  { id: 1, name: "🎁 Voucher 50 RON", quantity: 5 },
+  { id: 2, name: "☕ Cafea gratuită", quantity: 10 },
+  { id: 3, name: "🏆 Tricou Brand Motion", quantity: 3 },
+  { id: 4, name: "🎫 Bilet eveniment", quantity: 2 },
+];
+const LETTERS = ["A","B","C","D","E","F"];
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function buildBgStyle(bg) {
+  if (!bg || bg.type === "gradient")
+    return { background: `linear-gradient(135deg, ${bg?.color1||"#FF6B00"} 0%, ${bg?.color2||"#FF5500"} 100%)` };
+  if (bg.type === "solid") return { background: bg.color1 };
+  if (bg.type === "image" && bg.image)
+    return { backgroundImage:`url(${bg.image})`, backgroundSize:"cover", backgroundPosition:"center" };
+  return { background:"linear-gradient(135deg,#FF6B00,#FF5500)" };
+}
+
+// ─── CONFETTI ────────────────────────────────────────────────────────────────
+function Confetti({ active }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!active) return;
+    const cv = ref.current;
+    const ctx = cv.getContext("2d");
+    cv.width = window.innerWidth; cv.height = window.innerHeight;
+    const pieces = Array.from({ length: 140 }, () => ({
+      x: Math.random()*cv.width, y: Math.random()*-cv.height,
+      r: Math.random()*7+3, d: Math.random()*2+1,
+      color: ["#FF6B00","#FF9A3C","#fff","#FFD700","#FF4500"][Math.floor(Math.random()*5)],
+      tilt:0, ta:0, ts: Math.random()*0.1+0.04,
+    }));
+    let fr;
+    const draw = () => {
+      ctx.clearRect(0,0,cv.width,cv.height);
+      pieces.forEach(p => {
+        ctx.beginPath(); ctx.lineWidth=p.r/2; ctx.strokeStyle=p.color;
+        ctx.moveTo(p.x+p.tilt+p.r/3, p.y);
+        ctx.lineTo(p.x+p.tilt, p.y+p.tilt+p.r/5); ctx.stroke();
+        p.y+=p.d+1; p.ta+=p.ts; p.tilt=Math.sin(p.ta)*14;
+        if (p.y>cv.height) { p.y=-10; p.x=Math.random()*cv.width; }
+      });
+      fr = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(fr);
+  }, [active]);
+  if (!active) return null;
+  return <canvas ref={ref} style={{position:"fixed",top:0,left:0,pointerEvents:"none",zIndex:9999,width:"100%",height:"100%"}}/>;
+}
+
+// ─── PASSWORD MODAL ──────────────────────────────────────────────────────────
+function PwdModal({ adminPwd, setAdminPwd, pwdErr, setPwdErr, onLogin, onClose }) {
+  return (
+    <div style={S.modal}>
+      <div style={S.modalCard}>
+        <h3 style={S.modalTitle}>🔒 Acces Admin</h3>
+        <input
+          style={S.input} type="password" placeholder="Parolă..."
+          value={adminPwd}
+          onChange={e => { setAdminPwd(e.target.value); setPwdErr(false); }}
+          onKeyDown={e => e.key==="Enter" && onLogin()}
+          autoFocus
+        />
+        {pwdErr && <p style={{color:"#ff8888",marginTop:4,fontSize:13}}>Parolă incorectă.</p>}
+        <div style={{display:"flex",gap:8,marginTop:14}}>
+          <button style={S.btnPrimary} onClick={onLogin}>Intră</button>
+          <button style={S.btnSecondary} onClick={onClose}>Anulează</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── QUIZ SCREEN ─────────────────────────────────────────────────────────────
+function QuizScreen({ questions, prizes, onReset, onAdmin, bgStyle }) {
+  const [current, setCurrent] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answers, setAnswers] = useState([]);
+  const [done, setDone] = useState(false);
+  const [prize, setPrize] = useState(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [availablePrizes, setAvailablePrizes] = useState(prizes);
+  const [animIn, setAnimIn] = useState(true);
+
+  const q = questions[current];
+  const progress = Math.round((current / questions.length) * 100);
+
+  const handleSelect = (idx) => {
+    if (selected !== null) return;
+    setSelected(idx);
+    const isCorrect = idx === q.correct;
+    const newAnswers = [...answers, { questionId: q.id, selectedIdx: idx, correct: isCorrect }];
+    setAnswers(newAnswers);
+
+    setTimeout(() => {
+      if (current + 1 < questions.length) {
+        setAnimIn(false);
+        setTimeout(() => { setCurrent(c => c+1); setSelected(null); setAnimIn(true); }, 250);
+      } else {
+        const allCorrect = newAnswers.every(a => a.correct);
+        if (allCorrect) {
+          const pool = availablePrizes.filter(p => p.quantity > 0);
+          if (pool.length > 0) {
+            const winner = pool[Math.floor(Math.random()*pool.length)];
+            setPrize(winner);
+            setAvailablePrizes(prev => prev.map(p => p.id===winner.id ? {...p,quantity:p.quantity-1} : p));
+          } else {
+            setPrize({ name:"🎉 Toate premiile au fost câștigate!" });
+          }
+          setShowConfetti(true);
+          setTimeout(() => setShowConfetti(false), 6000);
+        }
+        setDone(true);
+      }
+    }, 700);
+  };
+
+  const rootStyle = {...S.root, ...bgStyle};
+
+  if (questions.length === 0) {
+    return (
+      <div style={rootStyle}>
+        <div style={S.centerCard}>
+          <p style={S.emptyText}>Nu există întrebări. Adaugă din Admin.</p>
+          <button style={S.btnPrimary} onClick={onReset}>← Acasă</button>
+        </div>
+      </div>
+    );
+  }
+
+  // RESULTS
+  if (done) {
+    const allCorrect = answers.every(a => a.correct);
+    return (
+      <div style={rootStyle}>
+        <Confetti active={showConfetti}/>
+        <div style={S.centerCard}>
+          {allCorrect ? (
+            <div style={S.finalCard}>
+              <h2 style={S.finalTitle}>Felicitări!</h2>
+              <p style={S.finalSubtitle}>Ai răspuns corect la toate întrebările!</p>
+              {prize && (
+                <div style={S.prizeBox}>
+                  <span style={S.prizeLabel}>PREMIUL TĂU</span>
+                  <span style={S.prizeName}>{prize.name}</span>
+                </div>
+              )}
+              <button style={S.btnStart} onClick={onReset}>Start Again</button>
+            </div>
+          ) : (
+            <div style={S.finalCard}>
+              <h2 style={S.finalTitle}>Mai încearcă data viitoare!</h2>
+              <p style={S.finalSubtitle}>Nu ai reușit de data aceasta, dar nu te descuraja!</p>
+              <p style={S.finalSubtitle}>Studiază întrebările și încearcă din nou —<br/>premiul te așteaptă!</p>
+              <button style={S.btnStart} onClick={onReset}>Start Again</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // QUESTION
+  return (
+    <div style={rootStyle}>
+      <div style={S.quizWrap}>
+        <div style={S.quizTopBar}>
+          <button style={S.resetBtn} onClick={onReset}>↺ Restart Quiz</button>
+          <div onClick={onAdmin} style={{width:48,height:40,cursor:"default"}}/>
+        </div>
+        <div style={S.progressRow}>
+          <div style={S.progressBar}>
+            <div style={{...S.progressFill, width:`${progress}%`}}/>
+          </div>
+          <span style={S.progressLabel}>{current+1}/{questions.length}</span>
+        </div>
+        <div style={{...S.questionCard, opacity:animIn?1:0, transform:animIn?"translateY(0)":"translateY(10px)", transition:"all 0.25s ease"}}>
+          <div style={S.qNumBadge}>Întrebarea {current+1}</div>
+          <p style={S.questionText}>{q.text}</p>
+        </div>
+        <div style={S.optionsList}>
+          {q.options.map((opt, idx) => {
+            const isSel = selected===idx;
+            return (
+              <button key={idx}
+                style={{
+                  ...S.optionRow,
+                  ...(isSel ? S.optionSelected : {}),
+                  opacity:animIn?1:0,
+                  transform:animIn?"translateX(0)":"translateX(-12px)",
+                  transition:`all 0.25s ease ${idx*60}ms`,
+                  cursor: selected!==null?"default":"pointer",
+                }}
+                onClick={() => handleSelect(idx)}
+              >
+                <span style={{...S.optionLetter, ...(isSel?S.optionLetterSelected:{})}}>
+                  {LETTERS[idx]}
+                </span>
+                <span style={S.optionText}>{opt}</span>
+                {isSel && <span style={S.optionCheck}>●</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ADMIN SCREEN ────────────────────────────────────────────────────────────
+function AdminScreen({ questions, setQuestions, prizes, setPrizes, bg, setBg, onBack }) {
+  const [tab, setTab] = useState("questions");
+  const [qText, setQText] = useState("");
+  const [qOpts, setQOpts] = useState(["",""]);
+  const [qCorrect, setQCorrect] = useState(0);
+  const [editingQ, setEditingQ] = useState(null);
+  const [pName, setPName] = useState("");
+  const [pQty, setPQty] = useState(1);
+  const [bgType, setBgType] = useState(bg.type||"gradient");
+  const [bgColor1, setBgColor1] = useState(bg.color1||"#FF6B00");
+  const [bgColor2, setBgColor2] = useState(bg.color2||"#FF5500");
+  const [bgImage, setBgImage] = useState(bg.image||null);
+  const fileRef = useRef(null);
+
+  const applyBg = () => setBg({ type:bgType, color1:bgColor1, color2:bgColor2, image:bgImage });
+  const handleImgUpload = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => { setBgImage(ev.target.result); setBgType("image"); };
+    r.readAsDataURL(f);
+  };
+
+  const addOpt = () => { if (qOpts.length<6) setQOpts([...qOpts,""]); };
+  const removeOpt = i => {
+    if (qOpts.length<=2) return;
+    const u = qOpts.filter((_,j)=>j!==i);
+    setQOpts(u);
+    if (qCorrect>=u.length) setQCorrect(u.length-1);
+  };
+  const updateOpt = (i,v) => { const o=[...qOpts]; o[i]=v; setQOpts(o); };
+
+  const saveQ = () => {
+    if (!qText.trim()||qOpts.some(o=>!o.trim())) return;
+    if (editingQ!==null) {
+      setQuestions(prev=>prev.map(q=>q.id===editingQ?{id:editingQ,text:qText,options:[...qOpts],correct:qCorrect}:q));
+      setEditingQ(null);
+    } else {
+      setQuestions(prev=>[...prev,{id:Date.now(),text:qText,options:[...qOpts],correct:qCorrect}]);
+    }
+    setQText(""); setQOpts(["",""]); setQCorrect(0);
+  };
+
+  const editQ = q => { setEditingQ(q.id); setQText(q.text); setQOpts([...q.options]); setQCorrect(q.correct); setTab("questions"); window.scrollTo({top:0,behavior:"smooth"}); };
+  const delQ = id => setQuestions(prev=>prev.filter(q=>q.id!==id));
+  const saveP = () => { if (!pName.trim()) return; setPrizes(prev=>[...prev,{id:Date.now(),name:pName,quantity:Number(pQty)}]); setPName(""); setPQty(1); };
+  const updQty = (id,v) => setPrizes(prev=>prev.map(p=>p.id===id?{...p,quantity:Math.max(0,Number(v))}:p));
+  const delP = id => setPrizes(prev=>prev.filter(p=>p.id!==id));
+
+  return (
+    <div style={{...S.root, background:"linear-gradient(135deg,#FF6B00,#FF5500)"}}>
+      <div style={S.adminWrap}>
+        <div style={S.adminHeader}>
+          <button style={S.backBtn} onClick={onBack}>← Înapoi</button>
+          <h2 style={S.adminTitle}>🛠 Admin</h2>
+        </div>
+        <div style={S.tabs}>
+          {["questions","prizes","design"].map(t=>(
+            <button key={t} style={tab===t?S.tabActive:S.tab} onClick={()=>setTab(t)}>
+              {t==="questions"?`❓ Întrebări (${questions.length})`:t==="prizes"?`🎁 Premii (${prizes.length})`:"🎨 Design"}
+            </button>
+          ))}
+        </div>
+
+        {tab==="questions" && (
+          <div style={S.adminSection}>
+            <div style={S.adminCard}>
+              <h3 style={S.cardTitle}>{editingQ?"✏️ Editează":"➕ Adaugă întrebare"}</h3>
+              <input style={S.input} placeholder="Textul întrebării..." value={qText} onChange={e=>setQText(e.target.value)}/>
+              <p style={S.hint}>Bifează radio-ul pentru răspunsul corect (2–6 variante).</p>
+              {qOpts.map((opt,i)=>(
+                <div key={i} style={S.optRow}>
+                  <label style={S.radioWrap}>
+                    <input type="radio" name="correct" checked={qCorrect===i} onChange={()=>setQCorrect(i)} style={{accentColor:"#FF6B00"}}/>
+                    <span style={{color:"#FF6B00",fontWeight:700,marginLeft:4,minWidth:18}}>{LETTERS[i]}</span>
+                  </label>
+                  <input style={{...S.input,marginBottom:0,flex:1}} placeholder={`Opțiunea ${LETTERS[i]}`} value={opt} onChange={e=>updateOpt(i,e.target.value)}/>
+                  {qOpts.length>2 && <button style={S.removeOptBtn} onClick={()=>removeOpt(i)}>✕</button>}
+                </div>
+              ))}
+              <div style={{display:"flex",gap:8,margin:"10px 0 14px"}}>
+                {qOpts.length<6 && <button style={S.addOptBtn} onClick={addOpt}>+ Adaugă variantă</button>}
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button style={S.btnPrimary} onClick={saveQ}>{editingQ?"Salvează":"Adaugă"}</button>
+                {editingQ && <button style={S.btnSecondary} onClick={()=>{setEditingQ(null);setQText("");setQOpts(["",""]);setQCorrect(0);}}>Anulează</button>}
+              </div>
+            </div>
+            <div style={S.listWrap}>
+              {questions.length===0 && <p style={S.emptyText}>Nicio întrebare.</p>}
+              {questions.map((q,i)=>(
+                <div key={q.id} style={S.listItem}>
+                  <div style={S.listItemContent}>
+                    <span style={S.listNum}>{i+1}.</span>
+                    <div style={{minWidth:0}}>
+                      <p style={S.listTitle}>{q.text}</p>
+                      <p style={S.listSub}>{q.options.length} variante · Corect: <strong style={{color:"#FFD700"}}>{q.options[q.correct]}</strong></p>
+                    </div>
+                  </div>
+                  <div style={S.listActions}>
+                    <button style={S.editBtn} onClick={()=>editQ(q)}>✏️</button>
+                    <button style={S.deleteBtn} onClick={()=>delQ(q.id)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab==="prizes" && (
+          <div style={S.adminSection}>
+            <div style={S.adminCard}>
+              <h3 style={S.cardTitle}>➕ Adaugă premiu</h3>
+              <input style={S.input} placeholder="Numele premiului (ex: 🎁 Voucher 100 RON)" value={pName} onChange={e=>setPName(e.target.value)}/>
+              <div style={{...S.optRow,marginBottom:0}}>
+                <label style={{color:"#fff",marginRight:8,fontSize:14,whiteSpace:"nowrap"}}>Cantitate:</label>
+                <input type="number" min={0} style={{...S.input,marginBottom:0,width:90}} value={pQty} onChange={e=>setPQty(e.target.value)}/>
+              </div>
+              <button style={{...S.btnPrimary,marginTop:14}} onClick={saveP}>Adaugă</button>
+            </div>
+            <div style={S.listWrap}>
+              {prizes.length===0 && <p style={S.emptyText}>Niciun premiu.</p>}
+              {prizes.map(p=>(
+                <div key={p.id} style={S.listItem}>
+                  <span style={S.listTitle}>{p.name}</span>
+                  <div style={S.listActions}>
+                    <div style={S.qtyWrap}>
+                      <button style={S.qtyBtn} onClick={()=>updQty(p.id,p.quantity-1)}>−</button>
+                      <span style={S.qtyNum}>{p.quantity}</span>
+                      <button style={S.qtyBtn} onClick={()=>updQty(p.id,p.quantity+1)}>+</button>
+                    </div>
+                    <button style={S.deleteBtn} onClick={()=>delP(p.id)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab==="design" && (
+          <div style={S.adminSection}>
+            <div style={S.adminCard}>
+              <h3 style={S.cardTitle}>🎨 Background quiz</h3>
+              <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+                {["gradient","solid","image"].map(t=>(
+                  <button key={t} style={bgType===t?S.tabActive:S.tab} onClick={()=>setBgType(t)}>
+                    {t==="gradient"?"🌈 Gradient":t==="solid"?"🟧 Culoare":"🖼 Poză"}
+                  </button>
+                ))}
+              </div>
+              {bgType==="gradient" && (
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:12}}>
+                  <div style={S.colorRow}><label style={S.colorLabel}>Culoare 1</label><input type="color" value={bgColor1} onChange={e=>setBgColor1(e.target.value)} style={S.colorPicker}/><span style={S.colorHex}>{bgColor1}</span></div>
+                  <div style={S.colorRow}><label style={S.colorLabel}>Culoare 2</label><input type="color" value={bgColor2} onChange={e=>setBgColor2(e.target.value)} style={S.colorPicker}/><span style={S.colorHex}>{bgColor2}</span></div>
+                </div>
+              )}
+              {bgType==="solid" && (
+                <div style={{marginBottom:12}}>
+                  <div style={S.colorRow}><label style={S.colorLabel}>Culoare</label><input type="color" value={bgColor1} onChange={e=>setBgColor1(e.target.value)} style={S.colorPicker}/><span style={S.colorHex}>{bgColor1}</span></div>
+                </div>
+              )}
+              {bgType==="image" && (
+                <div style={{marginBottom:12}}>
+                  <button style={S.uploadBtn} onClick={()=>fileRef.current.click()}>📁 Alege o poză de fundal</button>
+                  <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImgUpload}/>
+                  {bgImage && (
+                    <div style={S.imgPreviewWrap}>
+                      <img src={bgImage} alt="preview" style={S.imgPreview}/>
+                      <button style={S.removeImgBtn} onClick={()=>{setBgImage(null);setBgType("gradient");}}>✕ Șterge poza</button>
+                    </div>
+                  )}
+                  {!bgImage && <p style={{color:"rgba(255,255,255,0.5)",fontSize:13,marginTop:8}}>Nicio poză selectată.</p>}
+                </div>
+              )}
+              <div style={{...S.bgPreview, ...buildBgStyle({type:bgType,color1:bgColor1,color2:bgColor2,image:bgImage})}}>
+                <span style={S.bgPreviewLabel}>Preview</span>
+              </div>
+              <button style={{...S.btnPrimary,marginTop:16}} onClick={applyBg}>✅ Aplică background</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ROOT ────────────────────────────────────────────────────────────────
+function App() {
+  const [screen, setScreen] = useState("home");
+  const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
+  const [prizes, setPrizes] = useState(INITIAL_PRIZES);
+  const [adminPwd, setAdminPwd] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+  const [pwdErr, setPwdErr] = useState(false);
+  const [bg, setBg] = useState({type:"gradient",color1:"#FF6B00",color2:"#FF5500"});
+
+  const tapCount = useRef(0);
+  const tapTimer = useRef(null);
+  const handleSecretTap = () => {
+    tapCount.current++;
+    clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(()=>{ tapCount.current=0; }, 1500);
+    if (tapCount.current>=4) { tapCount.current=0; setShowPwd(true); }
+  };
+
+  const handleAdminLogin = () => {
+    if (adminPwd==="admin123") { setScreen("admin"); setShowPwd(false); setAdminPwd(""); setPwdErr(false); }
+    else setPwdErr(true);
+  };
+
+  const closeModal = () => { setShowPwd(false); setAdminPwd(""); setPwdErr(false); };
+  const bgStyle = buildBgStyle(bg);
+
+  if (screen==="admin") {
+    return <AdminScreen questions={questions} setQuestions={setQuestions} prizes={prizes} setPrizes={setPrizes} bg={bg} setBg={setBg} onBack={()=>setScreen("home")}/>;
+  }
+
+  if (screen==="quiz") {
+    return (
+      <>
+        <QuizScreen questions={questions} prizes={prizes} onReset={()=>setScreen("home")} onAdmin={()=>setShowPwd(true)} bgStyle={bgStyle}/>
+        {showPwd && <PwdModal adminPwd={adminPwd} setAdminPwd={setAdminPwd} pwdErr={pwdErr} setPwdErr={setPwdErr} onLogin={handleAdminLogin} onClose={closeModal}/>}
+      </>
+    );
+  }
+
+  return (
+    <div style={{...S.root,...bgStyle}}>
+      <div onClick={handleSecretTap} style={{position:"fixed",top:0,right:0,width:80,height:80,zIndex:200,cursor:"default"}}/>
+      <div style={S.homeContent}>
+        <h1 style={S.homeTitle}>QUIZ</h1>
+        <p style={S.homeSubtitle}>Răspunde corect la toate întrebările și câștigă un premiu!</p>
+        <button style={S.btnStart} onClick={()=>setScreen("quiz")}>ÎNCEPE QUIZ-UL →</button>
+      </div>
+      {showPwd && <PwdModal adminPwd={adminPwd} setAdminPwd={setAdminPwd} pwdErr={pwdErr} setPwdErr={setPwdErr} onLogin={handleAdminLogin} onClose={closeModal}/>}
+    </div>
+  );
+}
+
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+const S = {
+  root: { minHeight:"100vh", fontFamily:"'Segoe UI',system-ui,-apple-system,sans-serif", position:"relative", overflowX:"hidden" },
+  homeContent: { display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:"100vh", padding:"40px 20px" },
+  homeTitle: { fontSize:"clamp(64px,20vw,130px)", fontWeight:900, color:"#fff", margin:"0 0 20px", letterSpacing:"-4px", textShadow:"0 4px 30px rgba(0,0,0,0.3)" },
+  homeSubtitle: { fontSize:18, color:"rgba(255,255,255,0.88)", maxWidth:380, textAlign:"center", marginBottom:44, lineHeight:1.55 },
+  btnStart: { background:"#fff", color:"#FF6B00", border:"none", borderRadius:"50px", padding:"18px 56px", fontSize:18, fontWeight:900, cursor:"pointer", letterSpacing:"1px", boxShadow:"0 8px 32px rgba(0,0,0,0.25)" },
+  quizWrap: { maxWidth:560, margin:"0 auto", padding:"20px 20px 60px", minHeight:"100vh", display:"flex", flexDirection:"column", gap:16 },
+  quizTopBar: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 },
+  resetBtn: { background:"rgba(255,255,255,0.18)", border:"1.5px solid rgba(255,255,255,0.4)", color:"#fff", borderRadius:"50px", padding:"9px 20px", fontSize:13, fontWeight:700, cursor:"pointer" },
+  progressRow: { display:"flex", alignItems:"center", gap:12 },
+  progressBar: { flex:1, height:6, background:"rgba(255,255,255,0.22)", borderRadius:"99px", overflow:"hidden" },
+  progressFill: { height:"100%", background:"#fff", borderRadius:"99px", transition:"width 0.5s ease" },
+  progressLabel: { color:"rgba(255,255,255,0.85)", fontSize:13, fontWeight:700, minWidth:36, textAlign:"right" },
+  questionCard: { background:"rgba(0,0,0,0.18)", backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)", border:"1px solid rgba(255,255,255,0.18)", borderRadius:24, padding:"28px 26px" },
+  qNumBadge: { display:"inline-block", background:"rgba(255,255,255,0.2)", color:"rgba(255,255,255,0.85)", fontSize:11, fontWeight:700, letterSpacing:"1.5px", textTransform:"uppercase", borderRadius:"50px", padding:"4px 12px", marginBottom:12 },
+  questionText: { fontSize:"clamp(17px,3.5vw,22px)", fontWeight:700, color:"#fff", margin:0, lineHeight:1.45 },
+  optionsList: { display:"flex", flexDirection:"column", gap:10 },
+  optionRow: { display:"flex", alignItems:"center", gap:0, background:"rgba(255,255,255,0.12)", border:"1.5px solid rgba(255,255,255,0.22)", borderRadius:16, padding:0, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer", textAlign:"left", overflow:"hidden", transition:"all 0.18s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.1)" },
+  optionSelected: { background:"rgba(255,255,255,0.28)", border:"1.5px solid rgba(255,255,255,0.7)", boxShadow:"0 4px 20px rgba(0,0,0,0.2)" },
+  optionLetter: { display:"flex", alignItems:"center", justifyContent:"center", minWidth:52, height:54, fontSize:15, fontWeight:800, background:"rgba(255,255,255,0.15)", color:"rgba(255,255,255,0.8)", borderRight:"1.5px solid rgba(255,255,255,0.15)", flexShrink:0 },
+  optionLetterSelected: { background:"rgba(255,255,255,0.35)", color:"#fff" },
+  optionText: { flex:1, padding:"16px 18px", lineHeight:1.35 },
+  optionCheck: { padding:"0 16px", fontSize:14, color:"rgba(255,255,255,0.9)" },
+  centerCard: { display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh", padding:"40px 24px" },
+  finalCard: { display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", gap:32, maxWidth:420, width:"100%", margin:"0 auto" },
+  finalTitle: { fontSize:"clamp(30px,7vw,46px)", fontWeight:900, color:"#fff", margin:0, lineHeight:1.15, textShadow:"0 2px 20px rgba(0,0,0,0.25)" },
+  finalSubtitle: { fontSize:17, color:"rgba(255,255,255,0.88)", margin:0, lineHeight:1.7, maxWidth:340 },
+  prizeBox: { width:"100%", background:"rgba(255,255,255,0.18)", border:"2px solid rgba(255,255,255,0.45)", borderRadius:24, padding:"28px 32px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, boxShadow:"0 8px 32px rgba(0,0,0,0.15)", backdropFilter:"blur(12px)", WebkitBackdropFilter:"blur(12px)" },
+  prizeLabel: { fontSize:11, textTransform:"uppercase", letterSpacing:"3px", color:"rgba(255,255,255,0.6)", fontWeight:700 },
+  prizeName: { fontSize:26, fontWeight:900, color:"#fff", lineHeight:1.3 },
+  emptyText: { color:"rgba(255,255,255,0.7)", fontSize:16, textAlign:"center" },
+  adminWrap: { maxWidth:740, margin:"0 auto", padding:"24px 16px 80px" },
+  adminHeader: { display:"flex", alignItems:"center", gap:16, marginBottom:24 },
+  backBtn: { background:"rgba(255,255,255,0.2)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"50px", padding:"8px 18px", cursor:"pointer", fontSize:14 },
+  adminTitle: { color:"#fff", fontSize:24, fontWeight:900, margin:0 },
+  tabs: { display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" },
+  tab: { background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)", color:"rgba(255,255,255,0.75)", borderRadius:"50px", padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:600 },
+  tabActive: { background:"#fff", border:"1px solid #fff", color:"#FF6B00", borderRadius:"50px", padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:700 },
+  adminSection: { display:"flex", flexDirection:"column", gap:16 },
+  adminCard: { background:"rgba(255,255,255,0.15)", backdropFilter:"blur(12px)", WebkitBackdropFilter:"blur(12px)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:20, padding:24 },
+  cardTitle: { color:"#fff", fontWeight:800, fontSize:17, margin:"0 0 14px" },
+  input: { width:"100%", background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:10, padding:"10px 14px", color:"#fff", fontSize:15, marginBottom:10, outline:"none", boxSizing:"border-box" },
+  optRow: { display:"flex", alignItems:"center", gap:8, marginBottom:8 },
+  radioWrap: { display:"flex", alignItems:"center", cursor:"pointer", flexShrink:0 },
+  hint: { fontSize:12, color:"rgba(255,255,255,0.55)", margin:"0 0 10px" },
+  removeOptBtn: { background:"rgba(239,68,68,0.25)", border:"1px solid rgba(239,68,68,0.4)", color:"#fff", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:13, flexShrink:0 },
+  addOptBtn: { background:"rgba(255,255,255,0.15)", border:"1px dashed rgba(255,255,255,0.4)", color:"#fff", borderRadius:10, padding:"7px 16px", cursor:"pointer", fontSize:13, fontWeight:600 },
+  btnPrimary: { background:"#fff", color:"#FF6B00", border:"none", borderRadius:"50px", padding:"11px 28px", fontWeight:800, fontSize:14, cursor:"pointer" },
+  btnSecondary: { background:"rgba(255,255,255,0.15)", color:"#fff", border:"1px solid rgba(255,255,255,0.3)", borderRadius:"50px", padding:"11px 28px", fontWeight:700, fontSize:14, cursor:"pointer" },
+  listWrap: { display:"flex", flexDirection:"column", gap:8 },
+  listItem: { background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:14, padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 },
+  listItemContent: { display:"flex", alignItems:"flex-start", gap:10, flex:1, minWidth:0 },
+  listNum: { color:"rgba(255,255,255,0.5)", fontWeight:700, flexShrink:0 },
+  listTitle: { color:"#fff", fontWeight:600, margin:0, fontSize:14 },
+  listSub: { color:"rgba(255,255,255,0.6)", margin:"4px 0 0", fontSize:12 },
+  listActions: { display:"flex", gap:6, alignItems:"center", flexShrink:0 },
+  editBtn: { background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:14 },
+  deleteBtn: { background:"rgba(239,68,68,0.2)", border:"none", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:14 },
+  qtyWrap: { display:"flex", alignItems:"center", gap:4, background:"rgba(0,0,0,0.2)", borderRadius:10, padding:"4px 8px" },
+  qtyBtn: { background:"none", border:"none", color:"#fff", fontSize:18, cursor:"pointer", fontWeight:700, lineHeight:1 },
+  qtyNum: { color:"#fff", fontWeight:700, minWidth:28, textAlign:"center" },
+  colorRow: { display:"flex", alignItems:"center", gap:10, background:"rgba(255,255,255,0.1)", borderRadius:12, padding:"10px 14px" },
+  colorLabel: { color:"rgba(255,255,255,0.8)", fontSize:13, minWidth:70 },
+  colorPicker: { width:40, height:32, border:"none", borderRadius:6, cursor:"pointer", padding:0, background:"none" },
+  colorHex: { color:"#fff", fontSize:13, fontFamily:"monospace" },
+  uploadBtn: { background:"rgba(255,255,255,0.15)", border:"2px dashed rgba(255,255,255,0.4)", color:"#fff", borderRadius:12, padding:"12px 20px", cursor:"pointer", fontSize:14, fontWeight:600, width:"100%", textAlign:"center", display:"block" },
+  imgPreviewWrap: { marginTop:12, display:"flex", flexDirection:"column", gap:8, alignItems:"flex-start" },
+  imgPreview: { width:"100%", maxHeight:160, objectFit:"cover", borderRadius:12, border:"1px solid rgba(255,255,255,0.2)" },
+  removeImgBtn: { background:"rgba(239,68,68,0.25)", border:"1px solid rgba(239,68,68,0.4)", color:"#fff", borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:13 },
+  bgPreview: { width:"100%", height:80, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", marginTop:8, border:"1px solid rgba(255,255,255,0.2)" },
+  bgPreviewLabel: { color:"rgba(255,255,255,0.6)", fontSize:12, fontWeight:600, letterSpacing:"1.5px", textTransform:"uppercase" },
+  modal: { position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 },
+  modalCard: { background:"linear-gradient(135deg,#FF7B20,#FF5500)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:20, padding:28, width:"100%", maxWidth:360 },
+  modalTitle: { color:"#fff", fontWeight:900, fontSize:20, margin:"0 0 14px" },
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
