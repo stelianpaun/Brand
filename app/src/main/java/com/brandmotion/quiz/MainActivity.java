@@ -5,14 +5,12 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.webkit.WebChromeClient;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
 
-    private WebView webView;
+    private View welcomeScreen;
+    private View quizScreen;
+    private View resultsScreen;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,36 +33,53 @@ public class MainActivity extends Activity {
             | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         );
 
-        webView = new WebView(this);
-        setContentView(webView);
+        setContentView(R.layout.activity_main);
 
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
-        settings.setBuiltInZoomControls(false);
-        settings.setDisplayZoomControls(false);
-        settings.setSupportZoom(false);
-        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        settings.setMediaPlaybackRequiresUserGesture(false);
+        // Initialize screens
+        welcomeScreen = findViewById(R.id.welcome_screen);
+        quizScreen = findViewById(R.id.quiz_screen);
+        resultsScreen = findViewById(R.id.results_screen);
 
-        webView.setWebViewClient(new WebViewClient());
-        webView.setWebChromeClient(new WebChromeClient());
-        webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+        // Set up start quiz button
+        findViewById(R.id.btn_start_quiz).setOnClickListener(v -> startQuiz());
 
-        webView.loadUrl("file:///android_asset/index.html");
+        // Set up restart button
+        findViewById(R.id.btn_restart_quiz).setOnClickListener(v -> restartQuiz());
+
+        // Initialize QuizManager
+        QuizManager.getInstance().initialize(this, quizScreen, resultsScreen);
+
+        showWelcomeScreen();
+    }
+
+    private void startQuiz() {
+        hideAllScreens();
+        quizScreen.setVisibility(View.VISIBLE);
+        QuizManager.getInstance().loadQuestion();
+    }
+
+    private void restartQuiz() {
+        QuizManager.getInstance().reset();
+        hideAllScreens();
+        quizScreen.setVisibility(View.VISIBLE);
+        QuizManager.getInstance().loadQuestion();
+    }
+
+    private void showWelcomeScreen() {
+        hideAllScreens();
+        welcomeScreen.setVisibility(View.VISIBLE);
+    }
+
+    private void hideAllScreens() {
+        welcomeScreen.setVisibility(View.GONE);
+        quizScreen.setVisibility(View.GONE);
+        resultsScreen.setVisibility(View.GONE);
     }
 
     @Override
     public void onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        // Disable back button to prevent exiting
+        // User must complete quiz or restart
     }
 
     @Override
