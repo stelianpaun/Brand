@@ -19,22 +19,19 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Patch gradlew and build
+      - name: Patch gradlew
         run: |
-          python3 - << 'PYEOF'
-import os, stat
-new_gradlew = """#!/usr/bin/env sh
-APP_HOME="$(cd "$(dirname "$0")" && pwd -P)"
-CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
-if [ -n "$JAVA_HOME" ]; then JAVACMD="$JAVA_HOME/bin/java"; else JAVACMD="java"; fi
-exec "$JAVACMD" -Xmx2048m -Xms512m -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
-"""
-with open('gradlew', 'w') as f:
-    f.write(new_gradlew)
-os.chmod('gradlew', stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-print("gradlew patched successfully")
-PYEOF
-          ./gradlew assembleDebug
+          chmod +x gradlew
+          echo '#!/usr/bin/env sh' > /tmp/gw.sh
+          echo 'APP_HOME="$(cd "$(dirname "$0")" && pwd -P)"' >> /tmp/gw.sh
+          echo 'CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"' >> /tmp/gw.sh
+          echo 'if [ -n "$JAVA_HOME" ]; then JAVACMD="$JAVA_HOME/bin/java"; else JAVACMD="java"; fi' >> /tmp/gw.sh
+          echo 'exec "$JAVACMD" -Xmx2048m -Xms512m -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"' >> /tmp/gw.sh
+          cp /tmp/gw.sh gradlew
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
